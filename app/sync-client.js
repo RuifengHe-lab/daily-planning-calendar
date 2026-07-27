@@ -2,6 +2,7 @@ import { createClient } from "@supabase/supabase-js";
 
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
+const STORED_SYNC_KEY = "daily-planning-calendar-private-sync-key";
 let client;
 let configurationPromise;
 
@@ -114,11 +115,24 @@ async function decryptPlans(payload, encryptionKey) {
 export function getPrivateSyncKey() {
   if (typeof window === "undefined") return "";
   const parameters = new URLSearchParams(window.location.hash.slice(1));
-  return parameters.get("sync") || "";
+  const linkedKey = parameters.get("sync") || "";
+  if (linkedKey) {
+    window.localStorage.setItem(STORED_SYNC_KEY, linkedKey);
+    return linkedKey;
+  }
+
+  const storedKey = window.localStorage.getItem(STORED_SYNC_KEY) || "";
+  if (storedKey) {
+    const url = new URL(window.location.href);
+    url.hash = new URLSearchParams({ sync: storedKey }).toString();
+    window.history.replaceState(null, "", url);
+  }
+  return storedKey;
 }
 
 export function createPrivateSyncLink() {
   const syncKey = bytesToBase64Url(crypto.getRandomValues(new Uint8Array(32)));
+  window.localStorage.setItem(STORED_SYNC_KEY, syncKey);
   const url = new URL(window.location.href);
   url.hash = new URLSearchParams({ sync: syncKey }).toString();
   window.history.replaceState(null, "", url);
@@ -126,6 +140,7 @@ export function createPrivateSyncLink() {
 }
 
 export function clearPrivateSyncLink() {
+  window.localStorage.removeItem(STORED_SYNC_KEY);
   const url = new URL(window.location.href);
   url.hash = "";
   window.history.replaceState(null, "", url);
