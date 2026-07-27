@@ -10,7 +10,7 @@
 - 当日计划全部完成后自动盖章
 - 本地自动保存
 - 可安装为 PWA，首次联网访问后支持离线打开
-- 可选的私有账户云同步：电脑和手机登录同一账户
+- 可选的加密私人链接同步：电脑和手机收藏同一条链接
 
 ## 本地运行
 
@@ -29,23 +29,23 @@ pnpm build
 
 1. 创建一个 Supabase 项目。
 2. 在 Supabase SQL Editor 中执行 [`supabase/schema.sql`](supabase/schema.sql)。
-3. 在 Supabase Authentication 的 Users 页面手动创建唯一的登录用户。
-4. 不要在网站中提供注册入口；应用只实现登录。
-5. 将 `.env.example` 复制为 `.env.local`。
-6. 填入项目 URL 与 anon key：
+3. 将 `.env.example` 复制为 `.env.local`。
+4. 填入项目 URL 与 Publishable key：
 
 ```env
 SUPABASE_URL=https://your-project.supabase.co
-SUPABASE_ANON_KEY=your-anon-key
+SUPABASE_PUBLISHABLE_KEY=sb_publishable_your-key
 ```
 
-7. 重新构建并部署。
+5. 重新构建并部署。
 
-`anon` key 是浏览器客户端使用的公开项目标识，不是管理员密钥。数据表启用了 Row Level Security，只允许经过身份验证的用户读取和修改 `user_id = auth.uid()` 的记录。**不要在仓库、浏览器代码或部署日志中使用 `service_role` key。**
+Publishable key 是浏览器客户端使用的公开项目标识，不是管理员密钥。计划使用私人链接中的 256 位随机密钥进行 AES-GCM 加密；服务器不接收链接的 `#sync` 片段，只保存密文。数据库表禁止浏览器直接读写，只开放三个受限函数，并使用不可枚举的记录 ID 与独立写入令牌。**不要在仓库、浏览器代码或部署日志中使用 Secret/`service_role` key。**
 
 ## 数据与离线说明
 
 - 未配置云同步时，数据只保存在当前浏览器。
-- 配置云同步后，未登录用户无法进入日历；退出登录会清除此设备的本地计划副本。
+- 配置云同步后，首次打开时点击一次生成私人链接；其他设备打开并收藏同一条完整链接即可同步。
+- 获得私人链接的人拥有计划访问权，请勿转发或公开该链接。
+- 可以在同步设置中更换私人链接，旧链接对应的云端记录会被删除。
 - 离线时可以继续查看和编辑；恢复联网后会再次同步。
 - 第一次访问、安装以及跨设备同步仍然需要网络。

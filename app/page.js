@@ -2,13 +2,14 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
-  getCurrentSession,
+  clearPrivateSyncLink,
+  createPrivateSyncLink,
+  deleteCloudPlans,
+  getPrivateSyncKey,
+  getPrivateSyncUrl,
   isSyncConfigured,
   loadCloudPlans,
   saveCloudPlans,
-  signIn,
-  signOut,
-  watchSession,
 } from "./sync-client";
 
 const WEEKDAYS = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"];
@@ -372,33 +373,26 @@ function DayPanel({ day, plans, onClose, onSave, onNavigate }) {
   );
 }
 
-function AccountPanel({
+function PrivateLinkPanel({
   open,
   required,
   configured,
   onClose,
-  session,
+  hasLink,
   status,
-  onLogin,
-  onLogout,
+  onCreate,
+  onCopy,
+  onRotate,
+  onDisconnect,
 }) {
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
   const [submitting, setSubmitting] = useState(false);
-
-  useEffect(() => {
-    if (!open) setPassword("");
-  }, [open]);
 
   if (!open) return null;
 
-  const submit = async (event) => {
-    event.preventDefault();
-    if (!email.trim() || !password) return;
+  const rotate = async () => {
     setSubmitting(true);
-    const connected = await onLogin(email.trim(), password);
+    await onRotate();
     setSubmitting(false);
-    if (connected) onClose();
   };
 
   return (
@@ -407,7 +401,7 @@ function AccountPanel({
         className="sync-backdrop"
         type="button"
         onClick={required ? undefined : onClose}
-        aria-label={required ? "需要登录" : "关闭账户设置"}
+        aria-label={required ? "需要私人同步链接" : "关闭同步设置"}
       />
       <section className="sync-panel" role="dialog" aria-modal="true" aria-labelledby="sync-title">
         {!required && (
@@ -415,56 +409,41 @@ function AccountPanel({
             ×
           </button>
         )}
-        <span className="sync-kicker">PRIVATE ACCOUNT SYNC</span>
-        <h2 id="sync-title">登录后，在所有设备查看同一份计划</h2>
+        <span className="sync-kicker">PRIVATE LINK SYNC</span>
+        <h2 id="sync-title">不用登录，一条私人链接同步所有设备</h2>
         {configured ? (
-          session ? (
+          hasLink ? (
             <>
               <p>
-                当前登录：<strong>{session.user.email}</strong>
-                <br />
-                数据库权限只允许这个登录用户读取和修改自己的计划。
+                当前设备已连接。请把完整私人链接复制到自己的手机或电脑，并在每台设备收藏。
               </p>
               <div className={`sync-message ${status.tone}`}>{status.text}</div>
-              <button className="disconnect-button" type="button" onClick={onLogout}>
-                退出登录并清除此设备上的计划
-              </button>
+              <div className="sync-actions">
+                <button type="button" onClick={onCopy}>复制我的私人链接</button>
+                <small>不要把私人链接发给其他人；获得链接的人可以查看和修改计划。</small>
+                <button className="secondary" type="button" onClick={rotate} disabled={submitting}>
+                  {submitting ? "正在更换…" : "更换私人链接，让旧链接失效"}
+                </button>
+                <button className="disconnect-button" type="button" onClick={onDisconnect}>
+                  此设备停止同步
+                </button>
+              </div>
             </>
           ) : (
             <>
               <p>
-                本站不开放注册。请使用管理员预先创建的邮箱和密码登录；源码公开不会公开账户或计划数据。
+                点击一次即可生成随机私人链接。链接里的密钥不会发送给网站服务器，计划加密后才会保存到云端。
               </p>
-              <form onSubmit={submit}>
-                <label htmlFor="account-email">邮箱</label>
-                <input
-                  id="account-email"
-                  type="email"
-                  value={email}
-                  autoComplete="email"
-                  placeholder="name@example.com"
-                  onChange={(event) => setEmail(event.target.value)}
-                />
-                <label htmlFor="account-password">密码</label>
-                <input
-                  id="account-password"
-                  type="password"
-                  value={password}
-                  autoComplete="current-password"
-                  placeholder="输入密码"
-                  onChange={(event) => setPassword(event.target.value)}
-                />
-                <button type="submit" disabled={submitting || !email.trim() || !password}>
-                  {submitting ? "正在登录…" : "登录并同步"}
-                </button>
-              </form>
+              <div className="sync-actions">
+                <button type="button" onClick={onCreate}>创建我的私人同步链接</button>
+              </div>
               <div className={`sync-message ${status.tone}`}>{status.text}</div>
             </>
           )
         ) : (
           <div className="sync-not-configured">
             <strong>私有同步服务尚未连接</strong>
-            <p>配置 Supabase 项目后即可启用账户登录；密钥与用户密码不会写入公开仓库。</p>
+            <p>完成一次云数据库配置后即可使用；不需要创建网站账户或记密码。</p>
           </div>
         )}
       </section>
@@ -477,9 +456,9 @@ export default function CalendarPage() {
   const [selectedKey, setSelectedKey] = useState(null);
   const [loaded, setLoaded] = useState(false);
   const [plansUpdatedAt, setPlansUpdatedAt] = useState(0);
-  const [session, setSession] = useState(null);
+  const [syncKey, setSyncKey] = useState("");
   const [syncConfigured, setSyncConfigured] = useState(null);
-  const [authChecked, setAuthChecked] = useState(false);
+  const [configChecked, setConfigChecked] = useState(false);
   const [syncReady, setSyncReady] = useState(false);
   const [syncOpen, setSyncOpen] = useState(false);
   const [syncStatus, setSyncStatus] = useState({
@@ -492,6 +471,7 @@ export default function CalendarPage() {
       const saved = window.localStorage.getItem(STORAGE_KEY);
       if (saved) setPlans(JSON.parse(saved));
       setPlansUpdatedAt(Number(window.localStorage.getItem(UPDATED_KEY)) || 0);
+      setSyncKey(getPrivateSyncKey());
     } catch {
       setPlans({});
     } finally {
@@ -507,63 +487,37 @@ export default function CalendarPage() {
 
   useEffect(() => {
     let active = true;
-    let stopWatching = () => {};
-
-    const initializeAccount = async () => {
+    const initializeSync = async () => {
       const configured = await isSyncConfigured();
       if (!active) return;
       setSyncConfigured(configured);
-      if (!configured) {
-        setAuthChecked(true);
-        setSyncStatus({ tone: "local", text: "云同步待配置" });
-        return;
-      }
-
-      try {
-        const currentSession = await getCurrentSession();
-        if (!active) return;
-        setSession(currentSession);
-        setAuthChecked(true);
-        setSyncStatus({
-          tone: currentSession ? "syncing" : "local",
-          text: currentSession ? "正在恢复同步…" : "请登录以同步",
-        });
-
-        const unsubscribe = await watchSession((nextSession) => {
-          if (!active) return;
-          setSession(nextSession);
-          setAuthChecked(true);
-        });
-        if (!active) unsubscribe();
-        else stopWatching = unsubscribe;
-      } catch {
-        if (!active) return;
-        setSession(null);
-        setAuthChecked(true);
-        setSyncStatus({ tone: "error", text: "登录状态检查失败" });
-      }
+      setConfigChecked(true);
+      setSyncStatus({
+        tone: "local",
+        text: configured
+          ? getPrivateSyncKey()
+            ? "正在连接私人计划…"
+            : "创建私人链接以同步"
+          : "云同步待配置",
+      });
     };
 
-    initializeAccount();
-
-    return () => {
-      active = false;
-      stopWatching();
-    };
+    initializeSync();
+    return () => { active = false; };
   }, []);
 
-  const reconcileCloud = async (userId) => {
+  const reconcileCloud = async (key) => {
     if (!syncConfigured) return false;
     setSyncReady(false);
     setSyncStatus({ tone: "syncing", text: "正在核对云端…" });
     try {
-      const cloud = await loadCloudPlans(userId);
+      const cloud = await loadCloudPlans(key);
       if (cloud && cloud.updatedAt > plansUpdatedAt) {
         setPlans(cloud.plans);
         setPlansUpdatedAt(cloud.updatedAt);
       } else {
         const updatedAt = plansUpdatedAt || Date.now();
-        await saveCloudPlans(userId, plans, updatedAt);
+        await saveCloudPlans(key, plans, updatedAt);
         if (!plansUpdatedAt) setPlansUpdatedAt(updatedAt);
       }
       setSyncReady(true);
@@ -579,24 +533,24 @@ export default function CalendarPage() {
   };
 
   useEffect(() => {
-    if (!loaded || !session?.user?.id || !syncConfigured) {
+    if (!loaded || !syncKey || !syncConfigured) {
       setSyncReady(false);
-      if (authChecked && syncConfigured && !session) {
-        setSyncStatus({ tone: "local", text: "请登录以同步" });
+      if (configChecked && syncConfigured && !syncKey) {
+        setSyncStatus({ tone: "local", text: "创建私人链接以同步" });
       }
       return;
     }
-    reconcileCloud(session.user.id);
-    // Reconcile once after the local calendar and authenticated session are ready.
+    reconcileCloud(syncKey);
+    // Reconcile once after the local calendar and private link are ready.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [loaded, session?.user?.id, syncConfigured]);
+  }, [loaded, syncKey, syncConfigured]);
 
   useEffect(() => {
-    if (!loaded || !syncReady || !session?.user?.id || !plansUpdatedAt) return;
+    if (!loaded || !syncReady || !syncKey || !plansUpdatedAt) return;
     setSyncStatus({ tone: "syncing", text: "正在同步…" });
     const timer = window.setTimeout(async () => {
       try {
-        await saveCloudPlans(session.user.id, plans, plansUpdatedAt);
+        await saveCloudPlans(syncKey, plans, plansUpdatedAt);
         setSyncStatus({ tone: "synced", text: "云端已同步" });
       } catch (error) {
         setSyncStatus({
@@ -606,7 +560,7 @@ export default function CalendarPage() {
       }
     }, 900);
     return () => window.clearTimeout(timer);
-  }, [plans, plansUpdatedAt, session?.user?.id, syncReady, loaded]);
+  }, [plans, plansUpdatedAt, syncKey, syncReady, loaded]);
 
   const selectedDay = useMemo(
     () => ALL_DAYS.find((day) => day.key === selectedKey),
@@ -630,35 +584,45 @@ export default function CalendarPage() {
     });
   };
 
-  const loginAccount = async (email, password) => {
-    setSyncStatus({ tone: "syncing", text: "正在登录…" });
+  const createSyncLink = () => {
+    const key = createPrivateSyncLink();
+    setSyncKey(key);
+    setSyncOpen(false);
+    setSyncStatus({ tone: "syncing", text: "正在创建私人计划…" });
+  };
+
+  const copySyncLink = async () => {
     try {
-      const nextSession = await signIn(email, password);
-      setSession(nextSession);
-      setSyncStatus({ tone: "syncing", text: "登录成功，正在同步…" });
-      return true;
-    } catch (error) {
-      setSyncStatus({
-        tone: "error",
-        text: error instanceof Error ? error.message : "登录失败",
-      });
-      return false;
+      await navigator.clipboard.writeText(getPrivateSyncUrl());
+      setSyncStatus({ tone: "synced", text: "私人链接已复制" });
+    } catch {
+      setSyncStatus({ tone: "error", text: "复制失败，请复制浏览器完整地址" });
     }
   };
 
-  const logoutAccount = async () => {
+  const rotateSyncLink = async () => {
+    if (!syncKey) return;
+    setSyncStatus({ tone: "syncing", text: "正在停用旧链接…" });
     try {
-      await signOut();
-    } finally {
-      window.localStorage.removeItem(STORAGE_KEY);
-      window.localStorage.removeItem(UPDATED_KEY);
-      setPlans({});
-      setPlansUpdatedAt(0);
-      setSession(null);
-      setSyncReady(false);
+      await deleteCloudPlans(syncKey);
+      const nextKey = createPrivateSyncLink();
+      setSyncKey(nextKey);
       setSyncOpen(false);
-      setSyncStatus({ tone: "local", text: "已安全退出" });
+      setSyncStatus({ tone: "syncing", text: "正在启用新链接…" });
+    } catch (error) {
+      setSyncStatus({
+        tone: "error",
+        text: error instanceof Error ? error.message : "更换链接失败",
+      });
     }
+  };
+
+  const disconnectSync = () => {
+    clearPrivateSyncLink();
+    setSyncKey("");
+    setSyncReady(false);
+    setSyncOpen(false);
+    setSyncStatus({ tone: "local", text: "此设备仅本机保存" });
   };
 
   return (
@@ -747,15 +711,17 @@ export default function CalendarPage() {
         />
       )}
 
-      <AccountPanel
-        open={syncOpen || (syncConfigured && (!authChecked || !session))}
-        required={Boolean(syncConfigured && !session)}
+      <PrivateLinkPanel
+        open={syncOpen || Boolean(syncConfigured && configChecked && !syncKey)}
+        required={Boolean(syncConfigured && !syncKey)}
         configured={Boolean(syncConfigured)}
         onClose={() => setSyncOpen(false)}
-        session={session}
+        hasLink={Boolean(syncKey)}
         status={syncStatus}
-        onLogin={loginAccount}
-        onLogout={logoutAccount}
+        onCreate={createSyncLink}
+        onCopy={copySyncLink}
+        onRotate={rotateSyncLink}
+        onDisconnect={disconnectSync}
       />
     </main>
   );
