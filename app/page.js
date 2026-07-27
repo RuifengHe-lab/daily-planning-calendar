@@ -3,11 +3,11 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   getCurrentSession,
+  isSyncConfigured,
   loadCloudPlans,
   saveCloudPlans,
   signIn,
   signOut,
-  SYNC_CONFIGURED,
   watchSession,
 } from "./sync-client";
 
@@ -372,7 +372,16 @@ function DayPanel({ day, plans, onClose, onSave, onNavigate }) {
   );
 }
 
-function AccountPanel({ open, required, onClose, session, status, onLogin, onLogout }) {
+function AccountPanel({
+  open,
+  required,
+  configured,
+  onClose,
+  session,
+  status,
+  onLogin,
+  onLogout,
+}) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [submitting, setSubmitting] = useState(false);
@@ -408,7 +417,7 @@ function AccountPanel({ open, required, onClose, session, status, onLogin, onLog
         )}
         <span className="sync-kicker">PRIVATE ACCOUNT SYNC</span>
         <h2 id="sync-title">登录后，在所有设备查看同一份计划</h2>
-        {SYNC_CONFIGURED ? (
+        {configured ? (
           session ? (
             <>
               <p>
@@ -469,12 +478,13 @@ export default function CalendarPage() {
   const [loaded, setLoaded] = useState(false);
   const [plansUpdatedAt, setPlansUpdatedAt] = useState(0);
   const [session, setSession] = useState(null);
-  const [authChecked, setAuthChecked] = useState(!SYNC_CONFIGURED);
+  const [syncConfigured, setSyncConfigured] = useState(null);
+  const [authChecked, setAuthChecked] = useState(false);
   const [syncReady, setSyncReady] = useState(false);
   const [syncOpen, setSyncOpen] = useState(false);
   const [syncStatus, setSyncStatus] = useState({
     tone: "local",
-    text: SYNC_CONFIGURED ? "请登录以同步" : "云同步待配置",
+    text: "正在检查同步服务…",
   });
 
   useEffect(() => {
@@ -496,27 +506,45 @@ export default function CalendarPage() {
   }, [plans, plansUpdatedAt, loaded]);
 
   useEffect(() => {
-    if (!SYNC_CONFIGURED) return;
     let active = true;
+    let stopWatching = () => {};
 
-    getCurrentSession()
-      .then((currentSession) => {
+    const initializeAccount = async () => {
+      const configured = await isSyncConfigured();
+      if (!active) return;
+      setSyncConfigured(configured);
+      if (!configured) {
+        setAuthChecked(true);
+        setSyncStatus({ tone: "local", text: "云同步待配置" });
+        return;
+      }
+
+      try {
+        const currentSession = await getCurrentSession();
         if (!active) return;
         setSession(currentSession);
         setAuthChecked(true);
-      })
-      .catch(() => {
+        setSyncStatus({
+          tone: currentSession ? "syncing" : "local",
+          text: currentSession ? "正在恢复同步…" : "请登录以同步",
+        });
+
+        const unsubscribe = await watchSession((nextSession) => {
+          if (!active) return;
+          setSession(nextSession);
+          setAuthChecked(true);
+        });
+        if (!active) unsubscribe();
+        else stopWatching = unsubscribe;
+      } catch {
         if (!active) return;
         setSession(null);
         setAuthChecked(true);
         setSyncStatus({ tone: "error", text: "登录状态检查失败" });
-      });
+      }
+    };
 
-    const stopWatching = watchSession((nextSession) => {
-      if (!active) return;
-      setSession(nextSession);
-      setAuthChecked(true);
-    });
+    initializeAccount();
 
     return () => {
       active = false;
@@ -525,7 +553,7 @@ export default function CalendarPage() {
   }, []);
 
   const reconcileCloud = async (userId) => {
-    if (!SYNC_CONFIGURED) return false;
+    if (!syncConfigured) return false;
     setSyncReady(false);
     setSyncStatus({ tone: "syncing", text: "正在核对云端…" });
     try {
@@ -551,9 +579,9 @@ export default function CalendarPage() {
   };
 
   useEffect(() => {
-    if (!loaded || !session?.user?.id || !SYNC_CONFIGURED) {
+    if (!loaded || !session?.user?.id || !syncConfigured) {
       setSyncReady(false);
-      if (authChecked && SYNC_CONFIGURED && !session) {
+      if (authChecked && syncConfigured && !session) {
         setSyncStatus({ tone: "local", text: "请登录以同步" });
       }
       return;
@@ -561,7 +589,7 @@ export default function CalendarPage() {
     reconcileCloud(session.user.id);
     // Reconcile once after the local calendar and authenticated session are ready.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [loaded, session?.user?.id]);
+  }, [loaded, session?.user?.id, syncConfigured]);
 
   useEffect(() => {
     if (!loaded || !syncReady || !session?.user?.id || !plansUpdatedAt) return;
@@ -720,8 +748,9 @@ export default function CalendarPage() {
       )}
 
       <AccountPanel
-        open={syncOpen || (SYNC_CONFIGURED && (!authChecked || !session))}
-        required={SYNC_CONFIGURED && !session}
+        open={syncOpen || (syncConfigured && (!authChecked || !session))}
+        required={Boolean(syncConfigured && !session)}
+        configured={Boolean(syncConfigured)}
         onClose={() => setSyncOpen(false)}
         session={session}
         status={syncStatus}

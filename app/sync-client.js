@@ -1,41 +1,58 @@
 import { createClient } from "@supabase/supabase-js";
 
-const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL;
-const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-
-export const SYNC_CONFIGURED = Boolean(SUPABASE_URL && SUPABASE_ANON_KEY);
-
 let client;
+let configurationPromise;
 
-function getClient() {
-  if (!SYNC_CONFIGURED) throw new Error("云同步尚未配置");
-  if (!client) {
-    client = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+async function getConfiguration() {
+  if (!configurationPromise) {
+    configurationPromise = fetch("/api/sync-config", { cache: "no-store" })
+      .then((response) => {
+        if (!response.ok) throw new Error("无法读取同步配置");
+        return response.json();
+      })
+      .catch(() => ({ configured: false }));
+  }
+  return configurationPromise;
+}
+
+export async function isSyncConfigured() {
+  const configuration = await getConfiguration();
+  return Boolean(configuration.configured);
+}
+
+async function getClient() {
+  if (client) return client;
+  const configuration = await getConfiguration();
+  if (!configuration.configured) throw new Error("云同步尚未配置");
+  client = createClient(configuration.url, configuration.anonKey, {
       auth: {
         persistSession: true,
         autoRefreshToken: true,
         detectSessionInUrl: true,
       },
-    });
-  }
+  });
   return client;
 }
 
 export async function getCurrentSession() {
-  const { data, error } = await getClient().auth.getSession();
+  const supabase = await getClient();
+  const { data, error } = await supabase.auth.getSession();
   if (error) throw error;
   return data.session;
 }
 
 export function watchSession(callback) {
-  const { data } = getClient().auth.onAuthStateChange((_event, session) => {
+  return getClient().then((supabase) => {
+    const { data } = supabase.auth.onAuthStateChange((_event, session) => {
     callback(session);
   });
-  return () => data.subscription.unsubscribe();
+    return () => data.subscription.unsubscribe();
+  });
 }
 
 export async function signIn(email, password) {
-  const { data, error } = await getClient().auth.signInWithPassword({
+  const supabase = await getClient();
+  const { data, error } = await supabase.auth.signInWithPassword({
     email: email.trim(),
     password,
   });
@@ -44,12 +61,14 @@ export async function signIn(email, password) {
 }
 
 export async function signOut() {
-  const { error } = await getClient().auth.signOut();
+  const supabase = await getClient();
+  const { error } = await supabase.auth.signOut();
   if (error) throw error;
 }
 
 export async function loadCloudPlans(userId) {
-  const { data, error } = await getClient()
+  const supabase = await getClient();
+  const { data, error } = await supabase
     .from("calendar_plans")
     .select("plans, updated_at")
     .eq("user_id", userId)
@@ -64,7 +83,8 @@ export async function loadCloudPlans(userId) {
 }
 
 export async function saveCloudPlans(userId, plans, updatedAt = Date.now()) {
-  const { error } = await getClient()
+  const supabase = await getClient();
+  const { error } = await supabase
     .from("calendar_plans")
     .upsert(
       {
