@@ -1,0 +1,18 @@
+{
+  "name": "日程全清日历",
+  "short_name": "日程日历",
+  "description": "2026 年 7 月 29 日至年末的每日计划与完成记录",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#f2f0e9",
+  "theme_color": "#f2f0e9",
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
