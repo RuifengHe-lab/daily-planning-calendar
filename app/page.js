@@ -7,8 +7,10 @@ import {
   deleteCloudPlans,
   getPrivateSyncKey,
   getPrivateSyncUrl,
+  importPrivateSyncLink,
   isSyncConfigured,
   loadCloudPlans,
+  recoverPrivateSyncKey,
   saveCloudPlans,
 } from "./sync-client";
 
@@ -381,11 +383,14 @@ function PrivateLinkPanel({
   hasLink,
   status,
   onCreate,
+  onRestore,
   onCopy,
   onRotate,
   onDisconnect,
 }) {
   const [submitting, setSubmitting] = useState(false);
+  const [linkValue, setLinkValue] = useState("");
+  const [restoreError, setRestoreError] = useState("");
 
   if (!open) return null;
 
@@ -393,6 +398,17 @@ function PrivateLinkPanel({
     setSubmitting(true);
     await onRotate();
     setSubmitting(false);
+  };
+
+  const restore = (event) => {
+    event.preventDefault();
+    try {
+      onRestore(linkValue);
+      setLinkValue("");
+      setRestoreError("");
+    } catch (error) {
+      setRestoreError(error instanceof Error ? error.message : "私人链接无效");
+    }
   };
 
   return (
@@ -432,10 +448,31 @@ function PrivateLinkPanel({
           ) : (
             <>
               <p>
-                点击一次即可生成随机私人链接。链接里的密钥不会发送给网站服务器，计划加密后才会保存到云端。
+                如果这是已安装到桌面的日历，请粘贴原来的完整私人链接恢复同一份计划，不要重新创建。
               </p>
+              <form onSubmit={restore}>
+                <label htmlFor="private-link-input">恢复原来的私人链接</label>
+                <input
+                  id="private-link-input"
+                  type="text"
+                  inputMode="url"
+                  autoComplete="off"
+                  value={linkValue}
+                  onChange={(event) => setLinkValue(event.target.value)}
+                  placeholder="https://…/#sync=…"
+                  aria-describedby={restoreError ? "private-link-error" : undefined}
+                />
+                <button type="submit" disabled={!linkValue.trim()}>恢复并同步原计划</button>
+              </form>
+              {restoreError && (
+                <div className="sync-message error" id="private-link-error">{restoreError}</div>
+              )}
+              <div className="sync-divider"><span>确实没有旧链接</span></div>
               <div className="sync-actions">
-                <button type="button" onClick={onCreate}>创建我的私人同步链接</button>
+                <button className="secondary" type="button" onClick={onCreate}>
+                  创建一份新的私人日历
+                </button>
+                <small>新建会产生另一份独立云端日历，不会自动找回原计划。</small>
               </div>
               <div className={`sync-message ${status.tone}`}>{status.text}</div>
             </>
@@ -461,22 +498,29 @@ export default function CalendarPage() {
   const [configChecked, setConfigChecked] = useState(false);
   const [syncReady, setSyncReady] = useState(false);
   const [syncOpen, setSyncOpen] = useState(false);
+  const [syncPromptDismissed, setSyncPromptDismissed] = useState(false);
   const [syncStatus, setSyncStatus] = useState({
     tone: "local",
     text: "正在检查同步服务…",
   });
 
   useEffect(() => {
-    try {
-      const saved = window.localStorage.getItem(STORAGE_KEY);
-      if (saved) setPlans(JSON.parse(saved));
-      setPlansUpdatedAt(Number(window.localStorage.getItem(UPDATED_KEY)) || 0);
-      setSyncKey(getPrivateSyncKey());
-    } catch {
-      setPlans({});
-    } finally {
-      setLoaded(true);
-    }
+    let active = true;
+    const initializeLocalCalendar = async () => {
+      try {
+        const saved = window.localStorage.getItem(STORAGE_KEY);
+        if (saved) setPlans(JSON.parse(saved));
+        setPlansUpdatedAt(Number(window.localStorage.getItem(UPDATED_KEY)) || 0);
+        const recoveredKey = await recoverPrivateSyncKey();
+        if (active) setSyncKey(recoveredKey);
+      } catch {
+        if (active) setPlans({});
+      } finally {
+        if (active) setLoaded(true);
+      }
+    };
+    initializeLocalCalendar();
+    return () => { active = false; };
   }, []);
 
   useEffect(() => {
@@ -486,6 +530,7 @@ export default function CalendarPage() {
   }, [plans, plansUpdatedAt, loaded]);
 
   useEffect(() => {
+    if (!loaded) return;
     let active = true;
     const initializeSync = async () => {
       const configured = await isSyncConfigured();
@@ -504,7 +549,7 @@ export default function CalendarPage() {
 
     initializeSync();
     return () => { active = false; };
-  }, []);
+  }, [loaded]);
 
   const reconcileCloud = async (key) => {
     if (!syncConfigured) return false;
@@ -589,6 +634,14 @@ export default function CalendarPage() {
     setSyncKey(key);
     setSyncOpen(false);
     setSyncStatus({ tone: "syncing", text: "正在创建私人计划…" });
+  };
+
+  const restoreSyncLink = (value) => {
+    const key = importPrivateSyncLink(value);
+    setSyncKey(key);
+    setSyncPromptDismissed(false);
+    setSyncOpen(false);
+    setSyncStatus({ tone: "syncing", text: "正在恢复原来的私人计划…" });
   };
 
   const copySyncLink = async () => {
@@ -712,13 +765,20 @@ export default function CalendarPage() {
       )}
 
       <PrivateLinkPanel
-        open={syncOpen || Boolean(syncConfigured && configChecked && !syncKey)}
-        required={Boolean(syncConfigured && !syncKey)}
+        open={
+          syncOpen ||
+          Boolean(syncConfigured && configChecked && !syncKey && !syncPromptDismissed)
+        }
+        required={false}
         configured={Boolean(syncConfigured)}
-        onClose={() => setSyncOpen(false)}
+        onClose={() => {
+          setSyncOpen(false);
+          setSyncPromptDismissed(true);
+        }}
         hasLink={Boolean(syncKey)}
         status={syncStatus}
         onCreate={createSyncLink}
+        onRestore={restoreSyncLink}
         onCopy={copySyncLink}
         onRotate={rotateSyncLink}
         onDisconnect={disconnectSync}

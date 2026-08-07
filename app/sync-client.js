@@ -3,8 +3,75 @@ import { createClient } from "@supabase/supabase-js";
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
 const STORED_SYNC_KEY = "daily-planning-calendar-private-sync-key";
+const SYNC_DB_NAME = "daily-planning-calendar-private";
+const SYNC_DB_STORE = "local-secrets";
+const SYNC_DB_KEY = "private-sync-key";
 let client;
 let configurationPromise;
+
+function openSyncDatabase() {
+  return new Promise((resolve, reject) => {
+    if (!("indexedDB" in window)) {
+      reject(new Error("IndexedDB unavailable"));
+      return;
+    }
+    const request = window.indexedDB.open(SYNC_DB_NAME, 1);
+    request.onupgradeneeded = () => {
+      if (!request.result.objectStoreNames.contains(SYNC_DB_STORE)) {
+        request.result.createObjectStore(SYNC_DB_STORE);
+      }
+    };
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error);
+  });
+}
+
+async function writeSyncKeyBackup(syncKey) {
+  try {
+    const database = await openSyncDatabase();
+    await new Promise((resolve, reject) => {
+      const transaction = database.transaction(SYNC_DB_STORE, "readwrite");
+      transaction.objectStore(SYNC_DB_STORE).put(syncKey, SYNC_DB_KEY);
+      transaction.oncomplete = resolve;
+      transaction.onerror = () => reject(transaction.error);
+    });
+    database.close();
+    await navigator.storage?.persist?.();
+  } catch {
+    // localStorage remains the primary local copy when IndexedDB is unavailable.
+  }
+}
+
+async function readSyncKeyBackup() {
+  try {
+    const database = await openSyncDatabase();
+    const value = await new Promise((resolve, reject) => {
+      const transaction = database.transaction(SYNC_DB_STORE, "readonly");
+      const request = transaction.objectStore(SYNC_DB_STORE).get(SYNC_DB_KEY);
+      request.onsuccess = () => resolve(request.result || "");
+      request.onerror = () => reject(request.error);
+    });
+    database.close();
+    return value;
+  } catch {
+    return "";
+  }
+}
+
+async function clearSyncKeyBackup() {
+  try {
+    const database = await openSyncDatabase();
+    await new Promise((resolve, reject) => {
+      const transaction = database.transaction(SYNC_DB_STORE, "readwrite");
+      transaction.objectStore(SYNC_DB_STORE).delete(SYNC_DB_KEY);
+      transaction.oncomplete = resolve;
+      transaction.onerror = () => reject(transaction.error);
+    });
+    database.close();
+  } catch {
+    // Nothing else is required when the optional backup is unavailable.
+  }
+}
 
 async function getConfiguration() {
   if (!configurationPromise) {
@@ -44,6 +111,28 @@ function base64UrlToBytes(value) {
   const padded = base64.padEnd(Math.ceil(base64.length / 4) * 4, "=");
   const binary = atob(padded);
   return Uint8Array.from(binary, (character) => character.charCodeAt(0));
+}
+
+function validateSyncKey(value) {
+  const syncKey = value.trim();
+  if (!syncKey || base64UrlToBytes(syncKey).length !== 32) {
+    throw new Error("私人同步链接无效");
+  }
+  return syncKey;
+}
+
+function putSyncKeyInAddress(syncKey) {
+  const url = new URL(window.location.href);
+  url.hash = new URLSearchParams({ sync: syncKey }).toString();
+  window.history.replaceState(null, "", url);
+}
+
+function rememberSyncKey(syncKey) {
+  const validKey = validateSyncKey(syncKey);
+  window.localStorage.setItem(STORED_SYNC_KEY, validKey);
+  putSyncKeyInAddress(validKey);
+  void writeSyncKeyBackup(validKey);
+  return validKey;
 }
 
 function bytesToBase64(bytes) {
@@ -117,30 +206,62 @@ export function getPrivateSyncKey() {
   const parameters = new URLSearchParams(window.location.hash.slice(1));
   const linkedKey = parameters.get("sync") || "";
   if (linkedKey) {
-    window.localStorage.setItem(STORED_SYNC_KEY, linkedKey);
-    return linkedKey;
+    try {
+      return rememberSyncKey(linkedKey);
+    } catch {
+      return "";
+    }
   }
 
   const storedKey = window.localStorage.getItem(STORED_SYNC_KEY) || "";
   if (storedKey) {
-    const url = new URL(window.location.href);
-    url.hash = new URLSearchParams({ sync: storedKey }).toString();
-    window.history.replaceState(null, "", url);
+    try {
+      return rememberSyncKey(storedKey);
+    } catch {
+      window.localStorage.removeItem(STORED_SYNC_KEY);
+    }
   }
-  return storedKey;
+  return "";
+}
+
+export async function recoverPrivateSyncKey() {
+  const immediateKey = getPrivateSyncKey();
+  if (immediateKey) return immediateKey;
+
+  const backedUpKey = await readSyncKeyBackup();
+  if (!backedUpKey) return "";
+  try {
+    return rememberSyncKey(backedUpKey);
+  } catch {
+    await clearSyncKeyBackup();
+    return "";
+  }
+}
+
+export function importPrivateSyncLink(value) {
+  const input = value.trim();
+  if (!input) throw new Error("请粘贴原来的完整私人链接");
+
+  let syncKey = input;
+  try {
+    const url = new URL(input);
+    syncKey = new URLSearchParams(url.hash.slice(1)).get("sync") || "";
+  } catch {
+    if (input.startsWith("#")) {
+      syncKey = new URLSearchParams(input.slice(1)).get("sync") || "";
+    }
+  }
+  return rememberSyncKey(syncKey);
 }
 
 export function createPrivateSyncLink() {
   const syncKey = bytesToBase64Url(crypto.getRandomValues(new Uint8Array(32)));
-  window.localStorage.setItem(STORED_SYNC_KEY, syncKey);
-  const url = new URL(window.location.href);
-  url.hash = new URLSearchParams({ sync: syncKey }).toString();
-  window.history.replaceState(null, "", url);
-  return syncKey;
+  return rememberSyncKey(syncKey);
 }
 
 export function clearPrivateSyncLink() {
   window.localStorage.removeItem(STORED_SYNC_KEY);
+  void clearSyncKeyBackup();
   const url = new URL(window.location.href);
   url.hash = "";
   window.history.replaceState(null, "", url);

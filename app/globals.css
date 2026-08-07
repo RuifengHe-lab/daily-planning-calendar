@@ -978,6 +978,24 @@ input:focus-visible {
   opacity: 0.42;
 }
 
+.sync-divider {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 22px 0 2px;
+  color: #8a877e;
+  font-size: 9px;
+  letter-spacing: 0.12em;
+}
+
+.sync-divider::before,
+.sync-divider::after {
+  height: 1px;
+  flex: 1;
+  background: var(--line);
+  content: "";
+}
+
 .sync-message {
   margin-top: 15px;
   padding: 10px 12px;
