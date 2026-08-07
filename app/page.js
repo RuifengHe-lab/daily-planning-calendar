@@ -13,6 +13,7 @@ import {
   recoverPrivateSyncKey,
   saveCloudPlans,
 } from "./sync-client";
+import { updateTaskText } from "./task-utils";
 
 const WEEKDAYS = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"];
 const MONTHS = [
@@ -214,10 +215,22 @@ function MonthSection({ month, plans, onSelect }) {
 
 function DayPanel({ day, plans, onClose, onSave, onNavigate }) {
   const [draft, setDraft] = useState("");
+  const [editingId, setEditingId] = useState(null);
+  const [editingText, setEditingText] = useState("");
   const inputRef = useRef(null);
+  const editInputRef = useRef(null);
   const tasks = plans[day.key] || [];
   const allDone = completed(tasks);
   const dayIndex = ALL_DAYS.findIndex((item) => item.key === day.key);
+
+  useEffect(() => {
+    setEditingId(null);
+    setEditingText("");
+  }, [day.key]);
+
+  useEffect(() => {
+    if (editingId) editInputRef.current?.focus();
+  }, [editingId]);
 
   useEffect(() => {
     const handleKey = (event) => {
@@ -250,7 +263,26 @@ function DayPanel({ day, plans, onClose, onSave, onNavigate }) {
     );
   };
 
+  const startEditing = (task) => {
+    setEditingId(task.id);
+    setEditingText(task.text);
+  };
+
+  const cancelEditing = () => {
+    setEditingId(null);
+    setEditingText("");
+  };
+
+  const saveEditing = (event, id) => {
+    event.preventDefault();
+    const text = editingText.trim();
+    if (!text) return;
+    onSave(day.key, updateTaskText(tasks, id, text));
+    cancelEditing();
+  };
+
   const removeTask = (id) => {
+    if (editingId === id) cancelEditing();
     onSave(
       day.key,
       tasks.filter((task) => task.id !== id),
@@ -313,15 +345,45 @@ function DayPanel({ day, plans, onClose, onSave, onNavigate }) {
                 {task.done && <CheckIcon />}
               </button>
               <span className="task-index">{String(index + 1).padStart(2, "0")}</span>
-              <p>{task.text}</p>
-              <button
-                className="delete-button"
-                type="button"
-                onClick={() => removeTask(task.id)}
-                aria-label={`删除：${task.text}`}
-              >
-                ×
-              </button>
+              {editingId === task.id ? (
+                <form className="task-edit-form" onSubmit={(event) => saveEditing(event, task.id)}>
+                  <input
+                    ref={editInputRef}
+                    value={editingText}
+                    onChange={(event) => setEditingText(event.target.value)}
+                    onKeyDown={(event) => {
+                      if (event.key === "Escape") {
+                        event.stopPropagation();
+                        cancelEditing();
+                      }
+                    }}
+                    aria-label={`修改计划：${task.text}`}
+                    maxLength={80}
+                  />
+                  <button type="submit" disabled={!editingText.trim()}>保存</button>
+                  <button className="cancel" type="button" onClick={cancelEditing}>取消</button>
+                </form>
+              ) : (
+                <>
+                  <p>{task.text}</p>
+                  <button
+                    className="edit-button"
+                    type="button"
+                    onClick={() => startEditing(task)}
+                    aria-label={`修改：${task.text}`}
+                  >
+                    改
+                  </button>
+                  <button
+                    className="delete-button"
+                    type="button"
+                    onClick={() => removeTask(task.id)}
+                    aria-label={`删除：${task.text}`}
+                  >
+                    ×
+                  </button>
+                </>
+              )}
             </div>
           ))}
         </div>

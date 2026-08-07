@@ -668,7 +668,7 @@ input:focus-visible {
 
 .task-row {
   display: grid;
-  grid-template-columns: 24px 26px 1fr 24px;
+  grid-template-columns: 24px 26px 1fr 28px 24px;
   gap: 10px;
   align-items: center;
   min-height: 58px;
@@ -724,19 +724,72 @@ input:focus-visible {
   text-decoration-color: rgba(183, 68, 50, 0.55);
 }
 
+.edit-button,
 .delete-button {
   border: 0;
   background: transparent;
   color: #aaa79e;
-  font-size: 18px;
   cursor: pointer;
   opacity: 0;
   transition: opacity 160ms ease;
 }
 
+.edit-button {
+  padding: 4px 0;
+  color: #77746c;
+  font-size: 10px;
+}
+
+.delete-button {
+  font-size: 18px;
+}
+
+.task-row:hover .edit-button,
 .task-row:hover .delete-button,
+.edit-button:focus-visible,
 .delete-button:focus-visible {
   opacity: 1;
+}
+
+.task-edit-form {
+  display: grid;
+  grid-column: 3 / -1;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: 7px;
+  align-items: center;
+}
+
+.task-edit-form input {
+  min-width: 0;
+  padding: 8px 9px;
+  border: 1px solid var(--ink);
+  outline: 0;
+  background: rgba(255, 255, 255, 0.55);
+  font-family: "Songti SC", "STSong", "SimSun", serif;
+  font-size: 12px;
+}
+
+.task-edit-form input:focus {
+  box-shadow: inset 0 -2px 0 var(--red);
+}
+
+.task-edit-form button {
+  padding: 8px 9px;
+  border: 1px solid var(--ink);
+  background: var(--ink);
+  color: var(--paper);
+  cursor: pointer;
+  font-size: 9px;
+}
+
+.task-edit-form button.cancel {
+  background: transparent;
+  color: var(--ink);
+}
+
+.task-edit-form button:disabled {
+  cursor: not-allowed;
+  opacity: 0.4;
 }
 
 .empty-state {
@@ -1268,6 +1321,24 @@ input:focus-visible {
 
   .panel-date h2 {
     font-size: 19px;
+  }
+
+  .task-row {
+    grid-template-columns: 22px 20px minmax(0, 1fr) 24px 20px;
+    gap: 7px;
+  }
+
+  .edit-button,
+  .delete-button {
+    opacity: 0.72;
+  }
+
+  .task-edit-form {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .task-edit-form button.cancel {
+    grid-column: 2;
   }
 }
 

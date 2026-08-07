@@ -1,6 +1,11 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
-  <rect width="64" height="64" rx="14" fill="#f2f0e9"/>
-  <circle cx="32" cy="32" r="22" fill="none" stroke="#b74432" stroke-width="3"/>
-  <circle cx="32" cy="32" r="17" fill="none" stroke="#b74432" stroke-width="1.5" stroke-dasharray="2 2"/>
-  <path d="m22 32 7 7 14-16" fill="none" stroke="#b74432" stroke-linecap="round" stroke-linejoin="round" stroke-width="4"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-labelledby="title">
+  <title id="title">日程全清日历</title>
+  <rect width="512" height="512" rx="112" fill="#20241f"/>
+  <rect x="84" y="76" width="344" height="360" rx="56" fill="#f4f1e8"/>
+  <path d="M84 132c0-31 25-56 56-56h232c31 0 56 25 56 56v70H84z" fill="#b74432"/>
+  <rect x="150" y="52" width="34" height="96" rx="17" fill="#f4f1e8"/>
+  <rect x="328" y="52" width="34" height="96" rx="17" fill="#f4f1e8"/>
+  <path d="M142 254h228M142 316h116M142 378h92" fill="none" stroke="#bbb6aa" stroke-linecap="round" stroke-width="20"/>
+  <circle cx="342" cy="344" r="82" fill="#d39b2b"/>
+  <path d="m301 344 28 29 56-65" fill="none" stroke="#20241f" stroke-linecap="round" stroke-linejoin="round" stroke-width="24"/>
 </svg>
