@@ -668,7 +668,7 @@ input:focus-visible {
 
 .task-row {
   display: grid;
-  grid-template-columns: 24px 26px 1fr 28px 24px;
+  grid-template-columns: 24px 26px 1fr 40px 28px;
   gap: 10px;
   align-items: center;
   min-height: 58px;
@@ -726,16 +726,23 @@ input:focus-visible {
 
 .edit-button,
 .delete-button {
+  display: grid;
+  width: 28px;
+  height: 32px;
+  padding: 0;
+  place-items: center;
+  align-self: center;
   border: 0;
   background: transparent;
   color: #aaa79e;
   cursor: pointer;
+  line-height: 1;
   opacity: 0;
   transition: opacity 160ms ease;
 }
 
 .edit-button {
-  padding: 4px 0;
+  width: 40px;
   color: #77746c;
   font-size: 10px;
 }
@@ -1324,7 +1331,7 @@ input:focus-visible {
   }
 
   .task-row {
-    grid-template-columns: 22px 20px minmax(0, 1fr) 24px 20px;
+    grid-template-columns: 22px 20px minmax(0, 1fr) 40px 28px;
     gap: 7px;
   }
 
@@ -1339,6 +1346,12 @@ input:focus-visible {
 
   .task-edit-form button.cancel {
     grid-column: 2;
+  }
+
+  .add-task-form input,
+  .task-edit-form input,
+  .sync-panel input {
+    font-size: 16px;
   }
 }
 

@@ -1,5 +1,11 @@
-const CACHE_NAME = "daily-planning-calendar-v3";
-const APP_SHELL = ["/", "/manifest.webmanifest", "/icon.svg"];
+const CACHE_NAME = "daily-planning-calendar-v5";
+const APP_SHELL = [
+  "/",
+  "/manifest.webmanifest",
+  "/calendar-icon-v2.svg",
+  "/calendar-icon-v2-192.png",
+  "/calendar-icon-v2-512.png",
+];
 
 self.addEventListener("install", (event) => {
   event.waitUntil(

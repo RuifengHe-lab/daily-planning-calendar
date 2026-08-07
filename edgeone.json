@@ -1,0 +1,6 @@
+{
+  "buildCommand": "npx next build",
+  "installCommand": "pnpm install --frozen-lockfile",
+  "outputDirectory": ".next",
+  "nodeVersion": "22.11.0"
+}

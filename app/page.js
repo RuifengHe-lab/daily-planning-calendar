@@ -372,7 +372,7 @@ function DayPanel({ day, plans, onClose, onSave, onNavigate }) {
                     onClick={() => startEditing(task)}
                     aria-label={`修改：${task.text}`}
                   >
-                    改
+                    修改
                   </button>
                   <button
                     className="delete-button"
