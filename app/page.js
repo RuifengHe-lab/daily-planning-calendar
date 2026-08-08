@@ -140,6 +140,15 @@ function ArrowIcon({ direction = "right" }) {
   );
 }
 
+function TargetIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <circle cx="12" cy="12" r="4" />
+      <path d="M12 2v4M12 18v4M2 12h4M18 12h4" />
+    </svg>
+  );
+}
+
 function MonthSection({ month, plans, onSelect, todayKey }) {
   const firstWeekday = weekdayIndex(month.year, month.month, 1);
   const cells = Array.from({ length: 42 }, (_, index) => {
@@ -237,79 +246,6 @@ function MonthSection({ month, plans, onSelect, todayKey }) {
   );
 }
 
-function AgendaView({ plans, onSelect, todayKey }) {
-  const anchorIndex = useMemo(() => {
-    if (!todayKey) return 0;
-    const firstUpcoming = ALL_DAYS.findIndex((day) => day.key >= todayKey);
-    return firstUpcoming >= 0 ? firstUpcoming : Math.max(0, ALL_DAYS.length - 21);
-  }, [todayKey]);
-
-  const visibleDays = useMemo(
-    () =>
-      ALL_DAYS.filter((day, index) => {
-        const isRecent = index >= anchorIndex && index < anchorIndex + 21;
-        return isRecent || (plans[day.key] || []).length > 0;
-      }),
-    [anchorIndex, plans],
-  );
-
-  return (
-    <section className="agenda-view" aria-label="近期计划清单">
-      <header className="agenda-heading">
-        <div>
-          <span>近期 21 天</span>
-          <h2>每日清单</h2>
-        </div>
-        <p>含其他已安排日期</p>
-      </header>
-      <div className="agenda-list">
-        {visibleDays.map((day) => {
-          const tasks = plans[day.key] || [];
-          const finishedCount = tasks.filter((task) => task.done).length;
-          const isDone = completed(tasks);
-          const isToday = day.key === todayKey;
-          return (
-            <button
-              className={`agenda-day ${isToday ? "is-today" : ""} ${isDone ? "is-complete" : ""}`}
-              type="button"
-              key={day.key}
-              data-date={day.key}
-              onClick={() => onSelect(day.key)}
-              aria-current={isToday ? "date" : undefined}
-              aria-label={`${day.month}月${day.day}日 ${day.weekday}${isToday ? "，今天" : ""}，${tasks.length}条计划`}
-            >
-              <span className="agenda-date">
-                <strong>{String(day.day).padStart(2, "0")}</strong>
-                <span>{day.month} 月 · {day.weekday}</span>
-                {isToday && <em>今天</em>}
-              </span>
-              <span className="agenda-tasks">
-                {tasks.length === 0 ? (
-                  <span className="agenda-empty">暂无计划，点开添加</span>
-                ) : (
-                  <>
-                    {tasks.slice(0, 3).map((task) => (
-                      <span className={task.done ? "done" : ""} key={task.id}>
-                        <i>{task.done ? "✓" : ""}</i>
-                        {task.text}
-                      </span>
-                    ))}
-                    {tasks.length > 3 && <small>另 {tasks.length - 3} 项</small>}
-                  </>
-                )}
-              </span>
-              <span className="agenda-progress">
-                {tasks.length > 0 ? `${finishedCount}/${tasks.length}` : "＋"}
-              </span>
-              {isDone && <span className="agenda-stamp">全清</span>}
-            </button>
-          );
-        })}
-      </div>
-    </section>
-  );
-}
-
 function DayPanel({ day, plans, onClose, onSave, onNavigate }) {
   const [draft, setDraft] = useState("");
   const [editingId, setEditingId] = useState(null);
@@ -317,6 +253,10 @@ function DayPanel({ day, plans, onClose, onSave, onNavigate }) {
   const inputRef = useRef(null);
   const editInputRef = useRef(null);
   const panelRef = useRef(null);
+  const viewportHeightRef = useRef(0);
+  const viewportFrameRef = useRef(null);
+  const viewportTimerRef = useRef(null);
+  const transitionTimerRef = useRef(null);
   const tasks = plans[day.key] || [];
   const allDone = completed(tasks);
   const dayIndex = ALL_DAYS.findIndex((item) => item.key === day.key);
@@ -331,25 +271,56 @@ function DayPanel({ day, plans, onClose, onSave, onNavigate }) {
   }, [editingId]);
 
   useEffect(() => {
-    const updateViewport = () => {
+    const applyViewport = (smooth = false) => {
       const viewport = window.visualViewport;
       const panel = panelRef.current;
       if (!panel) return;
+      const height = Math.round(viewport?.height || window.innerHeight);
+      const top = Math.round(viewport?.offsetTop || 0);
+      panel.style.setProperty("--panel-resize-duration", smooth ? "180ms" : "0ms");
       panel.style.setProperty(
         "--panel-viewport-height",
-        `${Math.round(viewport?.height || window.innerHeight)}px`,
+        `${height}px`,
       );
       panel.style.setProperty(
         "--panel-viewport-top",
-        `${Math.round(viewport?.offsetTop || 0)}px`,
+        `${top}px`,
       );
+      viewportHeightRef.current = height;
+      if (smooth) {
+        window.clearTimeout(transitionTimerRef.current);
+        transitionTimerRef.current = window.setTimeout(() => {
+          panel.style.setProperty("--panel-resize-duration", "0ms");
+        }, 220);
+      }
     };
 
-    updateViewport();
+    const updateViewport = () => {
+      const height = Math.round(window.visualViewport?.height || window.innerHeight);
+      const isKeyboardClosing = viewportHeightRef.current > 0
+        && height > viewportHeightRef.current + 2;
+
+      window.cancelAnimationFrame(viewportFrameRef.current);
+      if (isKeyboardClosing) {
+        window.clearTimeout(viewportTimerRef.current);
+        viewportTimerRef.current = window.setTimeout(() => {
+          viewportFrameRef.current = window.requestAnimationFrame(() => applyViewport(true));
+        }, 90);
+        return;
+      }
+
+      window.clearTimeout(viewportTimerRef.current);
+      viewportFrameRef.current = window.requestAnimationFrame(() => applyViewport(false));
+    };
+
+    applyViewport();
     window.addEventListener("resize", updateViewport);
     window.visualViewport?.addEventListener("resize", updateViewport);
     window.visualViewport?.addEventListener("scroll", updateViewport);
     return () => {
+      window.cancelAnimationFrame(viewportFrameRef.current);
+      window.clearTimeout(viewportTimerRef.current);
+      window.clearTimeout(transitionTimerRef.current);
       window.removeEventListener("resize", updateViewport);
       window.visualViewport?.removeEventListener("resize", updateViewport);
       window.visualViewport?.removeEventListener("scroll", updateViewport);
@@ -698,13 +669,34 @@ export default function CalendarPage() {
   const [syncOpen, setSyncOpen] = useState(false);
   const [syncPromptDismissed, setSyncPromptDismissed] = useState(false);
   const [todayKey, setTodayKey] = useState("");
-  const [mobileView, setMobileView] = useState("calendar");
+  const [introPhase, setIntroPhase] = useState("visible");
   const syncInFlightRef = useRef(null);
   const lastAutomaticSyncRef = useRef(0);
   const [syncStatus, setSyncStatus] = useState({
     tone: "local",
     text: "正在检查同步服务…",
   });
+
+  useEffect(() => {
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+      setIntroPhase("hidden");
+      return undefined;
+    }
+    if (introPhase !== "visible") return undefined;
+    const timer = window.setTimeout(() => setIntroPhase("leaving"), 1_800);
+    return () => window.clearTimeout(timer);
+  }, [introPhase]);
+
+  useEffect(() => {
+    if (introPhase !== "leaving") return undefined;
+    const timer = window.setTimeout(() => setIntroPhase("hidden"), 780);
+    return () => window.clearTimeout(timer);
+  }, [introPhase]);
+
+  useEffect(() => {
+    document.body.classList.toggle("intro-open", introPhase !== "hidden");
+    return () => document.body.classList.remove("intro-open");
+  }, [introPhase]);
 
   useEffect(() => {
     const refreshToday = () => setTodayKey(localTodayKey());
@@ -961,21 +953,23 @@ export default function CalendarPage() {
 
   const scrollToToday = () => {
     if (!todayKey || !ALL_DAYS.some((day) => day.key === todayKey)) return;
-    const selector = mobileView === "list"
-      ? `.agenda-day[data-date="${todayKey}"]`
-      : `.day-cell[data-date="${todayKey}"]`;
-    document.querySelector(selector)?.scrollIntoView({ behavior: "smooth", block: "center" });
+    document
+      .querySelector(`.day-cell[data-date="${todayKey}"]`)
+      ?.scrollIntoView({ behavior: "smooth", block: "center" });
   };
 
   return (
     <main>
-      <header className="hero">
-        <div className="eyebrow">
-          <span />
-          2026 · SEASON PLANNER
-        </div>
-        <div className="hero-main">
-          <div>
+      {introPhase !== "hidden" && (
+        <section
+          className={`intro-splash ${introPhase === "leaving" ? "is-leaving" : ""}`}
+          aria-label="日程全清日历开场"
+        >
+          <div className="intro-content">
+            <div className="eyebrow">
+              <span />
+              2026 · SEASON PLANNER
+            </div>
             <h1>
               把日子，
               <br />
@@ -983,6 +977,14 @@ export default function CalendarPage() {
             </h1>
             <p>从盛夏到岁末，写下每一天的小目标。逐条完成，等一枚认真生活的印章。</p>
           </div>
+          <button type="button" className="intro-skip" onClick={() => setIntroPhase("leaving")}>
+            轻触进入
+          </button>
+        </section>
+      )}
+
+      <header className="main-header">
+        <div className="main-meta">
           <div className="date-window">
             <span>固定计划周期</span>
             <strong>07.29 — 12.31</strong>
@@ -1015,36 +1017,7 @@ export default function CalendarPage() {
         </div>
       </header>
 
-      <div className={`calendar-shell view-${mobileView}`}>
-        <div className="mobile-view-toolbar" aria-label="手机视图切换">
-          <div>
-            <button
-              type="button"
-              className={mobileView === "calendar" ? "active" : ""}
-              aria-pressed={mobileView === "calendar"}
-              onClick={() => setMobileView("calendar")}
-            >
-              日历
-            </button>
-            <button
-              type="button"
-              className={mobileView === "list" ? "active" : ""}
-              aria-pressed={mobileView === "list"}
-              onClick={() => setMobileView("list")}
-            >
-              清单
-            </button>
-          </div>
-          <button
-            type="button"
-            className="today-jump"
-            onClick={scrollToToday}
-            disabled={!ALL_DAYS.some((day) => day.key === todayKey)}
-          >
-            回到今天
-          </button>
-        </div>
-
+      <div className="calendar-shell">
         <div className="calendar-view">
           <div className="weekday-wrap">
             <div className="calendar-grid weekday-row">
@@ -1067,13 +1040,18 @@ export default function CalendarPage() {
             />
           ))}
         </div>
-
-        <AgendaView
-          plans={plans}
-          onSelect={setSelectedKey}
-          todayKey={todayKey}
-        />
       </div>
+
+      <button
+        type="button"
+        className="today-fab"
+        onClick={scrollToToday}
+        disabled={!ALL_DAYS.some((day) => day.key === todayKey)}
+        aria-label="回到今天"
+        title="回到今天"
+      >
+        <TargetIcon />
+      </button>
 
       <footer className="page-footer">
         <span>DAILY CLEAR © 2026</span>
