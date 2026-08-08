@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   clearPrivateSyncLink,
   createPrivateSyncLink,
@@ -102,6 +102,20 @@ const ALL_DAYS = makeDays();
 const STORAGE_KEY = "daily-clear-calendar-2026";
 const UPDATED_KEY = "daily-clear-calendar-2026-updated-at";
 
+function localTodayKey() {
+  const today = new Date();
+  return dateKey(today.getFullYear(), today.getMonth() + 1, today.getDate());
+}
+
+function syncedStatusText(timestamp = Date.now()) {
+  const time = new Intl.DateTimeFormat("zh-CN", {
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).format(new Date(timestamp));
+  return `刚刚已同步 · ${time}`;
+}
+
 function completed(tasks = []) {
   return tasks.length > 0 && tasks.every((task) => task.done);
 }
@@ -126,7 +140,7 @@ function ArrowIcon({ direction = "right" }) {
   );
 }
 
-function MonthSection({ month, plans, onSelect }) {
+function MonthSection({ month, plans, onSelect, todayKey }) {
   const firstWeekday = weekdayIndex(month.year, month.month, 1);
   const cells = Array.from({ length: 42 }, (_, index) => {
     const day = index - firstWeekday + 1;
@@ -167,14 +181,24 @@ function MonthSection({ month, plans, onSelect }) {
           const tasks = plans[cell.key] || [];
           const isDone = completed(tasks);
           const finishedCount = tasks.filter((task) => task.done).length;
+          const isToday = cell.key === todayKey;
+          const relativeClass = isToday
+            ? "is-today"
+            : todayKey
+              ? cell.key < todayKey
+                ? "is-past"
+                : "is-future"
+              : "";
 
           return (
             <button
-              className={`calendar-cell day-cell ${isDone ? "is-complete" : ""}`}
+              className={`calendar-cell day-cell ${relativeClass} ${isDone ? "is-complete" : ""}`}
               type="button"
               key={cell.key}
+              data-date={cell.key}
               onClick={() => onSelect(cell.key)}
-              aria-label={`${month.month}月${cell.day}日 ${cell.weekday}，${tasks.length}条计划`}
+              aria-current={isToday ? "date" : undefined}
+              aria-label={`${month.month}月${cell.day}日 ${cell.weekday}${isToday ? "，今天" : ""}，${tasks.length}条计划`}
             >
               <span className="day-top">
                 <span className="day-number">{String(cell.day).padStart(2, "0")}</span>
@@ -213,12 +237,86 @@ function MonthSection({ month, plans, onSelect }) {
   );
 }
 
+function AgendaView({ plans, onSelect, todayKey }) {
+  const anchorIndex = useMemo(() => {
+    if (!todayKey) return 0;
+    const firstUpcoming = ALL_DAYS.findIndex((day) => day.key >= todayKey);
+    return firstUpcoming >= 0 ? firstUpcoming : Math.max(0, ALL_DAYS.length - 21);
+  }, [todayKey]);
+
+  const visibleDays = useMemo(
+    () =>
+      ALL_DAYS.filter((day, index) => {
+        const isRecent = index >= anchorIndex && index < anchorIndex + 21;
+        return isRecent || (plans[day.key] || []).length > 0;
+      }),
+    [anchorIndex, plans],
+  );
+
+  return (
+    <section className="agenda-view" aria-label="近期计划清单">
+      <header className="agenda-heading">
+        <div>
+          <span>近期 21 天</span>
+          <h2>每日清单</h2>
+        </div>
+        <p>含其他已安排日期</p>
+      </header>
+      <div className="agenda-list">
+        {visibleDays.map((day) => {
+          const tasks = plans[day.key] || [];
+          const finishedCount = tasks.filter((task) => task.done).length;
+          const isDone = completed(tasks);
+          const isToday = day.key === todayKey;
+          return (
+            <button
+              className={`agenda-day ${isToday ? "is-today" : ""} ${isDone ? "is-complete" : ""}`}
+              type="button"
+              key={day.key}
+              data-date={day.key}
+              onClick={() => onSelect(day.key)}
+              aria-current={isToday ? "date" : undefined}
+              aria-label={`${day.month}月${day.day}日 ${day.weekday}${isToday ? "，今天" : ""}，${tasks.length}条计划`}
+            >
+              <span className="agenda-date">
+                <strong>{String(day.day).padStart(2, "0")}</strong>
+                <span>{day.month} 月 · {day.weekday}</span>
+                {isToday && <em>今天</em>}
+              </span>
+              <span className="agenda-tasks">
+                {tasks.length === 0 ? (
+                  <span className="agenda-empty">暂无计划，点开添加</span>
+                ) : (
+                  <>
+                    {tasks.slice(0, 3).map((task) => (
+                      <span className={task.done ? "done" : ""} key={task.id}>
+                        <i>{task.done ? "✓" : ""}</i>
+                        {task.text}
+                      </span>
+                    ))}
+                    {tasks.length > 3 && <small>另 {tasks.length - 3} 项</small>}
+                  </>
+                )}
+              </span>
+              <span className="agenda-progress">
+                {tasks.length > 0 ? `${finishedCount}/${tasks.length}` : "＋"}
+              </span>
+              {isDone && <span className="agenda-stamp">全清</span>}
+            </button>
+          );
+        })}
+      </div>
+    </section>
+  );
+}
+
 function DayPanel({ day, plans, onClose, onSave, onNavigate }) {
   const [draft, setDraft] = useState("");
   const [editingId, setEditingId] = useState(null);
   const [editingText, setEditingText] = useState("");
   const inputRef = useRef(null);
   const editInputRef = useRef(null);
+  const panelRef = useRef(null);
   const tasks = plans[day.key] || [];
   const allDone = completed(tasks);
   const dayIndex = ALL_DAYS.findIndex((item) => item.key === day.key);
@@ -231,6 +329,32 @@ function DayPanel({ day, plans, onClose, onSave, onNavigate }) {
   useEffect(() => {
     if (editingId) editInputRef.current?.focus();
   }, [editingId]);
+
+  useEffect(() => {
+    const updateViewport = () => {
+      const viewport = window.visualViewport;
+      const panel = panelRef.current;
+      if (!panel) return;
+      panel.style.setProperty(
+        "--panel-viewport-height",
+        `${Math.round(viewport?.height || window.innerHeight)}px`,
+      );
+      panel.style.setProperty(
+        "--panel-viewport-top",
+        `${Math.round(viewport?.offsetTop || 0)}px`,
+      );
+    };
+
+    updateViewport();
+    window.addEventListener("resize", updateViewport);
+    window.visualViewport?.addEventListener("resize", updateViewport);
+    window.visualViewport?.addEventListener("scroll", updateViewport);
+    return () => {
+      window.removeEventListener("resize", updateViewport);
+      window.visualViewport?.removeEventListener("resize", updateViewport);
+      window.visualViewport?.removeEventListener("scroll", updateViewport);
+    };
+  }, []);
 
   useEffect(() => {
     const handleKey = (event) => {
@@ -292,7 +416,13 @@ function DayPanel({ day, plans, onClose, onSave, onNavigate }) {
   return (
     <div className="panel-layer" role="presentation">
       <button className="panel-backdrop" onClick={onClose} aria-label="关闭计划面板" />
-      <aside className="day-panel" role="dialog" aria-modal="true" aria-labelledby="panel-title">
+      <aside
+        className="day-panel"
+        ref={panelRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="panel-title"
+      >
         <div className="panel-rule" />
         <header className="panel-header">
           <div className="panel-date">
@@ -449,6 +579,7 @@ function PrivateLinkPanel({
   onCopy,
   onRotate,
   onDisconnect,
+  onRetry,
 }) {
   const [submitting, setSubmitting] = useState(false);
   const [linkValue, setLinkValue] = useState("");
@@ -496,6 +627,11 @@ function PrivateLinkPanel({
                 当前设备已连接。请把完整私人链接复制到自己的手机或电脑，并在每台设备收藏。
               </p>
               <div className={`sync-message ${status.tone}`}>{status.text}</div>
+              {(status.tone === "error" || status.tone === "offline") && (
+                <button className="sync-retry-button" type="button" onClick={onRetry}>
+                  {status.tone === "offline" ? "检查网络并重试" : "立即重试同步"}
+                </button>
+              )}
               <div className="sync-actions">
                 <button type="button" onClick={onCopy}>复制我的私人链接</button>
                 <small>不要把私人链接发给其他人；获得链接的人可以查看和修改计划。</small>
@@ -561,10 +697,21 @@ export default function CalendarPage() {
   const [syncReady, setSyncReady] = useState(false);
   const [syncOpen, setSyncOpen] = useState(false);
   const [syncPromptDismissed, setSyncPromptDismissed] = useState(false);
+  const [todayKey, setTodayKey] = useState("");
+  const [mobileView, setMobileView] = useState("calendar");
+  const syncInFlightRef = useRef(null);
+  const lastAutomaticSyncRef = useRef(0);
   const [syncStatus, setSyncStatus] = useState({
     tone: "local",
     text: "正在检查同步服务…",
   });
+
+  useEffect(() => {
+    const refreshToday = () => setTodayKey(localTodayKey());
+    refreshToday();
+    const timer = window.setInterval(refreshToday, 60_000);
+    return () => window.clearInterval(timer);
+  }, []);
 
   useEffect(() => {
     let active = true;
@@ -613,31 +760,53 @@ export default function CalendarPage() {
     return () => { active = false; };
   }, [loaded]);
 
-  const reconcileCloud = async (key) => {
+  const recordSyncSuccess = useCallback(() => {
+    const timestamp = Date.now();
+    setSyncStatus({ tone: "synced", text: syncedStatusText(timestamp) });
+  }, []);
+
+  const reconcileCloud = useCallback(async (key, statusText = "正在核对云端…") => {
     if (!syncConfigured) return false;
-    setSyncReady(false);
-    setSyncStatus({ tone: "syncing", text: "正在核对云端…" });
-    try {
-      const cloud = await loadCloudPlans(key);
-      if (cloud && cloud.updatedAt > plansUpdatedAt) {
-        setPlans(cloud.plans);
-        setPlansUpdatedAt(cloud.updatedAt);
-      } else {
-        const updatedAt = plansUpdatedAt || Date.now();
-        await saveCloudPlans(key, plans, updatedAt);
-        if (!plansUpdatedAt) setPlansUpdatedAt(updatedAt);
-      }
-      setSyncReady(true);
-      setSyncStatus({ tone: "synced", text: "云端已同步" });
-      return true;
-    } catch (error) {
-      setSyncStatus({
-        tone: "error",
-        text: error instanceof Error ? error.message : "同步失败，请稍后重试",
-      });
+    if (!navigator.onLine) {
+      setSyncStatus({ tone: "offline", text: "离线，修改将等待上传" });
       return false;
     }
-  };
+    if (syncInFlightRef.current) return syncInFlightRef.current;
+
+    setSyncReady(false);
+    setSyncStatus({ tone: "syncing", text: statusText });
+    const operation = (async () => {
+      try {
+        const cloud = await loadCloudPlans(key);
+        if (cloud && cloud.updatedAt > plansUpdatedAt) {
+          setPlans(cloud.plans);
+          setPlansUpdatedAt(cloud.updatedAt);
+        } else if (!cloud || plansUpdatedAt > cloud.updatedAt) {
+          const updatedAt = plansUpdatedAt || Date.now();
+          await saveCloudPlans(key, plans, updatedAt);
+          if (!plansUpdatedAt) setPlansUpdatedAt(updatedAt);
+        }
+        setSyncReady(true);
+        recordSyncSuccess();
+        return true;
+      } catch (error) {
+        setSyncStatus({
+          tone: navigator.onLine ? "error" : "offline",
+          text: navigator.onLine
+            ? "同步失败，点此重试"
+            : "离线，修改将等待上传",
+        });
+        return false;
+      }
+    })();
+
+    syncInFlightRef.current = operation;
+    try {
+      return await operation;
+    } finally {
+      syncInFlightRef.current = null;
+    }
+  }, [plans, plansUpdatedAt, recordSyncSuccess, syncConfigured]);
 
   useEffect(() => {
     if (!loaded || !syncKey || !syncConfigured) {
@@ -654,20 +823,65 @@ export default function CalendarPage() {
 
   useEffect(() => {
     if (!loaded || !syncReady || !syncKey || !plansUpdatedAt) return;
+    if (!navigator.onLine) {
+      setSyncStatus({ tone: "offline", text: "离线，修改将等待上传" });
+      return;
+    }
     setSyncStatus({ tone: "syncing", text: "正在同步…" });
     const timer = window.setTimeout(async () => {
       try {
         await saveCloudPlans(syncKey, plans, plansUpdatedAt);
-        setSyncStatus({ tone: "synced", text: "云端已同步" });
+        recordSyncSuccess();
       } catch (error) {
         setSyncStatus({
-          tone: "error",
-          text: error instanceof Error ? error.message : "同步失败，数据已保存在本机",
+          tone: navigator.onLine ? "error" : "offline",
+          text: navigator.onLine
+            ? "同步失败，点此重试"
+            : "离线，修改将等待上传",
         });
       }
     }, 900);
     return () => window.clearTimeout(timer);
-  }, [plans, plansUpdatedAt, syncKey, syncReady, loaded]);
+  }, [plans, plansUpdatedAt, syncKey, syncReady, loaded, recordSyncSuccess]);
+
+  useEffect(() => {
+    if (!loaded || !syncKey || !syncConfigured) return;
+
+    const runAutomaticSync = (message, force = false) => {
+      if (document.visibilityState === "hidden") return;
+      const now = Date.now();
+      if (!force && now - lastAutomaticSyncRef.current < 1_500) return;
+      lastAutomaticSyncRef.current = now;
+      void reconcileCloud(syncKey, message);
+    };
+
+    const handleOnline = () => {
+      setSyncStatus({ tone: "syncing", text: "网络已恢复，正在同步…" });
+      runAutomaticSync("网络已恢复，正在核对云端…", true);
+    };
+    const handleOffline = () => {
+      setSyncStatus({ tone: "offline", text: "离线，修改将等待上传" });
+    };
+    const handleVisibility = () => {
+      if (document.visibilityState === "visible") {
+        runAutomaticSync("正在检查其他设备的更新…");
+      }
+    };
+    const handleFocus = () => runAutomaticSync("正在检查其他设备的更新…");
+
+    window.addEventListener("online", handleOnline);
+    window.addEventListener("offline", handleOffline);
+    window.addEventListener("focus", handleFocus);
+    document.addEventListener("visibilitychange", handleVisibility);
+    if (!navigator.onLine) handleOffline();
+
+    return () => {
+      window.removeEventListener("online", handleOnline);
+      window.removeEventListener("offline", handleOffline);
+      window.removeEventListener("focus", handleFocus);
+      document.removeEventListener("visibilitychange", handleVisibility);
+    };
+  }, [loaded, reconcileCloud, syncConfigured, syncKey]);
 
   const selectedDay = useMemo(
     () => ALL_DAYS.find((day) => day.key === selectedKey),
@@ -740,6 +954,19 @@ export default function CalendarPage() {
     setSyncStatus({ tone: "local", text: "此设备仅本机保存" });
   };
 
+  const retrySync = () => {
+    if (!syncKey) return;
+    void reconcileCloud(syncKey, "正在重新同步…");
+  };
+
+  const scrollToToday = () => {
+    if (!todayKey || !ALL_DAYS.some((day) => day.key === todayKey)) return;
+    const selector = mobileView === "list"
+      ? `.agenda-day[data-date="${todayKey}"]`
+      : `.day-cell[data-date="${todayKey}"]`;
+    document.querySelector(selector)?.scrollIntoView({ behavior: "smooth", block: "center" });
+  };
+
   return (
     <main>
       <header className="hero">
@@ -788,26 +1015,64 @@ export default function CalendarPage() {
         </div>
       </header>
 
-      <div className="calendar-shell">
-        <div className="weekday-wrap">
-          <div className="calendar-grid weekday-row">
-            {WEEKDAYS.map((day, index) => (
-              <div className={index > 4 ? "weekend" : ""} key={day}>
-                <span>{String(index + 1).padStart(2, "0")}</span>
-                <strong>{day}</strong>
-              </div>
-            ))}
+      <div className={`calendar-shell view-${mobileView}`}>
+        <div className="mobile-view-toolbar" aria-label="手机视图切换">
+          <div>
+            <button
+              type="button"
+              className={mobileView === "calendar" ? "active" : ""}
+              aria-pressed={mobileView === "calendar"}
+              onClick={() => setMobileView("calendar")}
+            >
+              日历
+            </button>
+            <button
+              type="button"
+              className={mobileView === "list" ? "active" : ""}
+              aria-pressed={mobileView === "list"}
+              onClick={() => setMobileView("list")}
+            >
+              清单
+            </button>
           </div>
+          <button
+            type="button"
+            className="today-jump"
+            onClick={scrollToToday}
+            disabled={!ALL_DAYS.some((day) => day.key === todayKey)}
+          >
+            回到今天
+          </button>
         </div>
 
-        {MONTHS.map((month) => (
-          <MonthSection
-            key={month.month}
-            month={month}
-            plans={plans}
-            onSelect={setSelectedKey}
-          />
-        ))}
+        <div className="calendar-view">
+          <div className="weekday-wrap">
+            <div className="calendar-grid weekday-row">
+              {WEEKDAYS.map((day, index) => (
+                <div className={index > 4 ? "weekend" : ""} key={day}>
+                  <span>{String(index + 1).padStart(2, "0")}</span>
+                  <strong>{day}</strong>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {MONTHS.map((month) => (
+            <MonthSection
+              key={month.month}
+              month={month}
+              plans={plans}
+              onSelect={setSelectedKey}
+              todayKey={todayKey}
+            />
+          ))}
+        </div>
+
+        <AgendaView
+          plans={plans}
+          onSelect={setSelectedKey}
+          todayKey={todayKey}
+        />
       </div>
 
       <footer className="page-footer">
@@ -844,6 +1109,7 @@ export default function CalendarPage() {
         onCopy={copySyncLink}
         onRotate={rotateSyncLink}
         onDisconnect={disconnectSync}
+        onRetry={retrySync}
       />
     </main>
   );

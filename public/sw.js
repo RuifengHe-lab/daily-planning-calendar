@@ -1,4 +1,4 @@
-const CACHE_NAME = "daily-planning-calendar-v5";
+const CACHE_NAME = "daily-planning-calendar-v6";
 const APP_SHELL = [
   "/",
   "/manifest.webmanifest",
