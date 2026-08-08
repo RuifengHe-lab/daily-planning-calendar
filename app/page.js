@@ -253,10 +253,6 @@ function DayPanel({ day, plans, onClose, onSave, onNavigate }) {
   const inputRef = useRef(null);
   const editInputRef = useRef(null);
   const panelRef = useRef(null);
-  const viewportHeightRef = useRef(0);
-  const viewportFrameRef = useRef(null);
-  const viewportTimerRef = useRef(null);
-  const transitionTimerRef = useRef(null);
   const tasks = plans[day.key] || [];
   const allDone = completed(tasks);
   const dayIndex = ALL_DAYS.findIndex((item) => item.key === day.key);
@@ -271,56 +267,25 @@ function DayPanel({ day, plans, onClose, onSave, onNavigate }) {
   }, [editingId]);
 
   useEffect(() => {
-    const applyViewport = (smooth = false) => {
+    const updateViewport = () => {
       const viewport = window.visualViewport;
       const panel = panelRef.current;
       if (!panel) return;
-      const height = Math.round(viewport?.height || window.innerHeight);
-      const top = Math.round(viewport?.offsetTop || 0);
-      panel.style.setProperty("--panel-resize-duration", smooth ? "180ms" : "0ms");
       panel.style.setProperty(
         "--panel-viewport-height",
-        `${height}px`,
+        `${Math.round(viewport?.height || window.innerHeight)}px`,
       );
       panel.style.setProperty(
         "--panel-viewport-top",
-        `${top}px`,
+        `${Math.round(viewport?.offsetTop || 0)}px`,
       );
-      viewportHeightRef.current = height;
-      if (smooth) {
-        window.clearTimeout(transitionTimerRef.current);
-        transitionTimerRef.current = window.setTimeout(() => {
-          panel.style.setProperty("--panel-resize-duration", "0ms");
-        }, 220);
-      }
     };
 
-    const updateViewport = () => {
-      const height = Math.round(window.visualViewport?.height || window.innerHeight);
-      const isKeyboardClosing = viewportHeightRef.current > 0
-        && height > viewportHeightRef.current + 2;
-
-      window.cancelAnimationFrame(viewportFrameRef.current);
-      if (isKeyboardClosing) {
-        window.clearTimeout(viewportTimerRef.current);
-        viewportTimerRef.current = window.setTimeout(() => {
-          viewportFrameRef.current = window.requestAnimationFrame(() => applyViewport(true));
-        }, 90);
-        return;
-      }
-
-      window.clearTimeout(viewportTimerRef.current);
-      viewportFrameRef.current = window.requestAnimationFrame(() => applyViewport(false));
-    };
-
-    applyViewport();
+    updateViewport();
     window.addEventListener("resize", updateViewport);
     window.visualViewport?.addEventListener("resize", updateViewport);
     window.visualViewport?.addEventListener("scroll", updateViewport);
     return () => {
-      window.cancelAnimationFrame(viewportFrameRef.current);
-      window.clearTimeout(viewportTimerRef.current);
-      window.clearTimeout(transitionTimerRef.current);
       window.removeEventListener("resize", updateViewport);
       window.visualViewport?.removeEventListener("resize", updateViewport);
       window.visualViewport?.removeEventListener("scroll", updateViewport);
